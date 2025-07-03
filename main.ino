@@ -12,9 +12,9 @@
 #define WATER_FLOW_SENSOR A0
 
 // === Adjustables ===
-#define wake_time 3600000 //1hour
-#define time_to_ice 700000    
-#define time_to_release 10000 
+#define wake_time 3600000 // wakes back up in an hour. set to zero to disable
+#define time_to_ice 660000    
+#define time_to_release 12000
 #define time_to_fill_tray 13000 
 const unsigned long MOTOR_TIMEOUT = 6000;
 
@@ -355,7 +355,12 @@ void loop() {
       digitalWrite(POWER_LED, led_state ? HIGH : LOW);
       last_blink_time = current_time;
     }
-
+    //resume running after a set period. set to zero to disable
+    if(current_time - wentToSleepAt_time > wake_time && wake_time != 0))
+    {
+      system_on = !system_on;
+      Serial.println(system_on);
+    }
     
   }
 

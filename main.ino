@@ -13,8 +13,8 @@
 
 // === Adjustables ===
 #define wake_time 3600000 //1hour
-#define time_to_ice 650000    
-#define time_to_release 15000 
+#define time_to_ice 700000    
+#define time_to_release 10000 
 #define time_to_fill_tray 13000 
 const unsigned long MOTOR_TIMEOUT = 6000;
 
@@ -333,9 +333,12 @@ void loop() {
   unsigned long current_time = millis();
  if (interruptFlag) {
     interruptFlag = false;  // Clear flag
+    if(!ICE_FULL && !NO_WATER)
+    {
     system_on = !system_on;
     Serial.println(system_on);
     if(!system_on) sleep();
+    }
   }
 
   if (system_on) {
@@ -353,11 +356,7 @@ void loop() {
       last_blink_time = current_time;
     }
 
-    if (!ICE_FULL && !NO_WATER) {
-      Serial.println("False ISR trigger, resuming");
-      system_on = true;
-      interruptFlag = false;
-    }
+    
   }
 
   }

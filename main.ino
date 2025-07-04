@@ -28,7 +28,7 @@ unsigned long wentToSleepAt_time = 0;
 bool led_state = false;
 volatile bool interruptFlag = false;
 volatile unsigned long lastInterruptTime = 0;
-const unsigned long debounceDelay = 500; // milliseconds
+const unsigned long debounceDelay = 600; // milliseconds
 
 void setup() {
   Serial.begin(9600);
@@ -55,7 +55,7 @@ void setup() {
 }
 
 void toggleSystemState() {
-  delayMicroseconds(200);
+  delayMicroseconds(250);
   unsigned long currentTime = millis();
 
   // Check if enough time has passed since the last interrupt
@@ -89,7 +89,7 @@ bool moveToload()
       Serial.println("@top");
       return true; //already at top
     }
-    if(millis() - startTime > 400 && digitalRead(BOT_LIMIT) == LOW && attemptOne == false && digitalRead(TOP_LIMIT) == HIGH)
+    if(millis() - startTime > 500 && digitalRead(BOT_LIMIT) == LOW && attemptOne == false)
     {
       attemptOne = true;
         if(digitalRead(TOP_LIMIT) == LOW) 
@@ -100,7 +100,7 @@ bool moveToload()
       }
         reverseMotor();
     }
-     if(millis() - startTime > 800 && digitalRead(BOT_LIMIT) == LOW && attemptTwo == false && digitalRead(TOP_LIMIT) == HIGH)
+     if(millis() - startTime > 1000 && digitalRead(BOT_LIMIT) == LOW && attemptTwo == false)
     {
       attemptTwo = true;
         if(digitalRead(TOP_LIMIT) == LOW) 
@@ -138,7 +138,7 @@ bool moveToUnload()
       Serial.println("@bot");
       return true; //already at bottom
     }
-    if(millis() - startTime > 400 && digitalRead(TOP_LIMIT) == LOW && attemptOne == false && digitalRead(BOT_LIMIT) == HIGH)
+    if(millis() - startTime > 500 && digitalRead(TOP_LIMIT) == LOW && attemptOne == false)
     {
       attemptOne = true;
         reverseMotor();
@@ -149,7 +149,7 @@ bool moveToUnload()
         Serial.println("@bot");
         return true; //already at bottom
       }
-     if(millis() - startTime > 800 && digitalRead(TOP_LIMIT) == LOW && attemptTwo == false && digitalRead(BOT_LIMIT) == HIGH)
+     if(millis() - startTime > 1000 && digitalRead(TOP_LIMIT) == LOW && attemptTwo == false)
     {
       attemptTwo = true;
         if(digitalRead(BOT_LIMIT) == LOW) 
@@ -191,12 +191,6 @@ void motorCCW()
 
 void reverseMotor()
 {
-  if( digitalRead(TOP_LIMIT) == HIGH && digitalRead(BOT_LIMIT) == HIGH)
-  {
-    Serial.println("ERROR: Trying to reverse in transit");
-    stopMotor();
-    return;
-  }
   if(digitalRead(TOP_LIMIT) == LOW && digitalRead(BOT_LIMIT) == LOW)
   {
     Serial.println("ERROR: Critical - Both switches active");
@@ -217,13 +211,24 @@ void reverseMotor()
 
 void unloadTray()
 {
-  while(!moveToUnload()) {}
+  while(!moveToUnload()) 
+  { if (interruptFlag == true) {
+      Serial.println("Button pressed — aborting early");
+      break;
+      }
+      }
   Serial.println("NOW UNLOADED");
 }
 
 void loadTray()
 {
-  while(!moveToload()) {}
+  while(!moveToload()) 
+  {
+     if (interruptFlag == true) {
+      Serial.println("Button pressed — aborting early");
+      break;
+      }
+    }
   Serial.println("NOW LOADED");
 }
 
@@ -244,10 +249,10 @@ void pump_water() {
 bool check_ice_full() {
   ICE_FULL = false;
   int infra = analogRead(ICE_FULL_SENSOR);
-  float volt = infra*(5.0)/(1023); //4.03V IR light det and 4.82v with hand blocking sensor
+  float volt = infra*(5.0)/(1023); //dark room: 3.92 to 4.85 bright room:  0.9-3.025 
   Serial.print("ice sensor: ");
   Serial.println(volt);
-  ICE_FULL = (volt>=4.5);
+  ICE_FULL = (volt>=4.2); //i chose values for dark room. Covering the machine's clear top will improve accuracy. Rewireing the led to create two samples (one with led and one without) will improve detection veracity during multiple light level scenarios
   return ICE_FULL;
 }
 
@@ -260,6 +265,7 @@ void state_1() {
   if (check_ice_full()) {
     Serial.println("Ice bin full. Retrying in 60 sec...");
     delay(60000);
+    if (interruptFlag == true) return;
     if (check_ice_full()) {
       sleep();
     }
@@ -276,6 +282,7 @@ void state_2() {
   if (NO_WATER) {
     Serial.println("No water detected. Retrying in 60 sec...");
     delay(60000);
+    if (interruptFlag == true) return;
     pump_water();
     if (NO_WATER){
       sleep();
@@ -284,13 +291,14 @@ void state_2() {
 }
 
 void state_3() {
+  if (interruptFlag == true) return;
   Serial.println("State 3");
   digitalWrite(COMPRESSOR, HIGH);
   digitalWrite(FAN_PIN, HIGH);
   unsigned long startTime = millis();
   while (millis() - startTime < time_to_ice) {
     if (interruptFlag == true) {
-      Serial.println("Button pressed during ice cycle — aborting early");
+      Serial.println("Button pressed — aborting early");
       break;
       }
     
@@ -336,8 +344,13 @@ void loop() {
     if(!ICE_FULL && !NO_WATER)
     {
     system_on = !system_on;
+    Serial.print("System: ");
     Serial.println(system_on);
-    if(!system_on) sleep();
+    if(!system_on)
+    {
+      sleep();
+      return;
+    }
     }
   }
 
@@ -359,6 +372,7 @@ void loop() {
     if(current_time - wentToSleepAt_time > wake_time && wake_time != 0)
     {
       system_on = !system_on;
+      Serial.print("System: ");
       Serial.println(system_on);
     }
     

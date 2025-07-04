@@ -356,7 +356,7 @@ void loop() {
       last_blink_time = current_time;
     }
     //resume running after a set period. set to zero to disable
-    if(current_time - wentToSleepAt_time > wake_time && wake_time != 0))
+    if(current_time - wentToSleepAt_time > wake_time && wake_time != 0)
     {
       system_on = !system_on;
       Serial.println(system_on);
@@ -364,5 +364,5 @@ void loop() {
     
   }
 
-  }
+  
 }

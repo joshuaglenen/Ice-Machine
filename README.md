@@ -84,8 +84,10 @@ Fig 8: Ice
 
 The completed machine was reassembled and returned to service. It has been operating reliably since the rebuild. A custom PCB and complete wiring diagram have been constructed in KiCad and will be added below
 
-<img width="3507" height="2480" alt="circed" src="https://github.com/user-attachments/assets/6320adf2-a4e5-4828-bc58-109a971889e3" />
+<img width="3507" height="2480" alt="circuit" src="https://github.com/user-attachments/assets/c43c284b-309e-4617-b41c-8014744bae3c" />
 
 Diagram 1: Circuit of Embedded System
 
-Diagram 2: 
+<img width="666" height="519" alt="Capture" src="https://github.com/user-attachments/assets/b3576ca5-78cd-4a53-90be-dfc7369eb402" />
+
+Diagram 2: 3D PCB Model Simulated in KiCAD

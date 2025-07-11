@@ -12,11 +12,11 @@
 #define WATER_FLOW_SENSOR A0
 
 // === Adjustables ===
-#define wake_time 3600000 // wakes back up in an hour. set to zero to disable
+#define wake_time 21600000 // wakes back up in 6 hour. set to zero to disable
 #define time_to_ice 660000    
 #define time_to_release 12000
 #define time_to_fill_tray 13000 
-const unsigned long MOTOR_TIMEOUT = 6000;
+const unsigned long MOTOR_TIMEOUT = 7000;
 
 // === LOGIC ===
 bool motorDirectionCW = true; //CW dumps ice and CCW loads water
@@ -28,7 +28,7 @@ unsigned long wentToSleepAt_time = 0;
 bool led_state = false;
 volatile bool interruptFlag = false;
 volatile unsigned long lastInterruptTime = 0;
-const unsigned long debounceDelay = 600; // milliseconds
+const unsigned long debounceDelay = 1000; // milliseconds
 
 void setup() {
   Serial.begin(9600);
@@ -55,7 +55,7 @@ void setup() {
 }
 
 void toggleSystemState() {
-  delayMicroseconds(250);
+  delayMicroseconds(300);
   unsigned long currentTime = millis();
 
   // Check if enough time has passed since the last interrupt
@@ -168,7 +168,7 @@ bool moveToUnload()
 void stopMotor() {
   digitalWrite(motorPinA, LOW);
   digitalWrite(motorPinB, LOW);
-  delay(10);
+  delay(250);
 }
 
 void motorCW()
@@ -249,10 +249,10 @@ void pump_water() {
 bool check_ice_full() {
   ICE_FULL = false;
   int infra = analogRead(ICE_FULL_SENSOR);
-  float volt = infra*(5.0)/(1023); //dark room: 3.92 to 4.85 bright room:  0.9-3.025 
+  float volt = infra*(5.0)/(1023); //dark room: 3.83 to 4.85 bright room:  0.9-3.025 
   Serial.print("ice sensor: ");
   Serial.println(volt);
-  ICE_FULL = (volt>=4.2); //i chose values for dark room. Covering the machine's clear top will improve accuracy. Rewireing the led to create two samples (one with led and one without) will improve detection veracity during multiple light level scenarios
+  ICE_FULL = (volt>=4.5); //i chose values for dark room. Covering the machine's clear top will improve accuracy. Rewireing the led to create two samples (one with led and one without) will improve detection veracity during multiple light level scenarios
   return ICE_FULL;
 }
 
@@ -293,16 +293,27 @@ void state_2() {
 void state_3() {
   if (interruptFlag == true) return;
   Serial.println("State 3");
-  digitalWrite(COMPRESSOR, HIGH);
   digitalWrite(FAN_PIN, HIGH);
+  
+  //extra one minute cool down for compressor pressure to stablize
+  unsigned long startTime = millis();
+  while (millis() - startTime < 60000) {
+    if (interruptFlag == true) {
+      Serial.println("Button pressed — aborting early");
+      break;
+      }
+    delay(10);
+  }
+  
+  digitalWrite(COMPRESSOR, HIGH);
+
+  //cooling period is time_to_ice
   unsigned long startTime = millis();
   while (millis() - startTime < time_to_ice) {
     if (interruptFlag == true) {
       Serial.println("Button pressed — aborting early");
       break;
       }
-    
-
     delay(10);
   }
 }
@@ -315,6 +326,7 @@ void state_4() {
   digitalWrite(SOLENOID, HIGH);
   delay(time_to_release);
   digitalWrite(SOLENOID, LOW);
+
 }
 
 void sleep()
@@ -340,7 +352,7 @@ void loop() {
     
   unsigned long current_time = millis();
  if (interruptFlag) {
-    interruptFlag = false;  // Clear flag
+    interruptFlag = false; 
     if(!ICE_FULL && !NO_WATER)
     {
     system_on = !system_on;

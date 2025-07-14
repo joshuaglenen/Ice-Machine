@@ -38,7 +38,7 @@ Fig 6: Water sensor
 
 The circuit diagrams were developed through iterative design to accommodate the components I had on hand and to reuse as much of the existing machine wiring as possible. The completed system is built around an Arduino Uno R3, which manages all input monitoring, state logic, and output control. For AC components, relays are used to switch 120V lines (live wire connected to NO terminal; neutral wired directly to the component). For DC devices such as the water pump and LED indicators, NPN MOSFETs are used to sink current to ground from a reused 9VDC PSU.
 
-The full wiring diagram is included below as Diagram 1. Gerber files are included but unused and a 3D model of the PCB is shown in Diagram 2.
+The full wiring diagram is included below as Diagram 1. Gerber files are included and a 3D model of the PCB is shown in Diagram 2.
 
 <img width="3507" height="2480" alt="circuit" src="https://github.com/user-attachments/assets/c43c284b-309e-4617-b41c-8014744bae3c" />
 

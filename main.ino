@@ -16,7 +16,7 @@
 #define time_to_ice 660000    
 #define time_to_release 12000
 #define time_to_fill_tray 13000 
-const unsigned long MOTOR_TIMEOUT = 7000;
+const unsigned long MOTOR_TIMEOUT = 5000;
 
 // === LOGIC ===
 bool motorDirectionCW = true; //CW dumps ice and CCW loads water
@@ -55,11 +55,11 @@ void setup() {
 }
 
 void toggleSystemState() {
-  delayMicroseconds(300);
+  delayMicroseconds(10);
   unsigned long currentTime = millis();
 
   // Check if enough time has passed since the last interrupt
-  if (digitalRead(PUSH_BUTTON) == LOW && currentTime - lastInterruptTime > debounceDelay) {
+  if (digitalRead(PUSH_BUTTON) == LOW && ((currentTime - lastInterruptTime) > debounceDelay)) {
     interruptFlag = true;
     lastInterruptTime = currentTime;
     Serial.println("INTERRUPT TRIGGERED");
@@ -72,8 +72,6 @@ void toggleSystemState() {
 bool moveToload() 
 {
   motorDirectionCW = false;
-  bool attemptOne = false;
-  bool attemptTwo = false;
   if(digitalRead(TOP_LIMIT) == LOW) 
   {
     return true; //already at top
@@ -89,46 +87,37 @@ bool moveToload()
       Serial.println("@top");
       return true; //already at top
     }
-    if(millis() - startTime > 500 && digitalRead(BOT_LIMIT) == LOW && attemptOne == false)
-    {
-      attemptOne = true;
-        if(digitalRead(TOP_LIMIT) == LOW) 
-      {
-        stopMotor();
-        Serial.println("@top");
-        return true; //already at top
-      }
-        reverseMotor();
-    }
-     if(millis() - startTime > 1000 && digitalRead(BOT_LIMIT) == LOW && attemptTwo == false)
-    {
-      attemptTwo = true;
-        if(digitalRead(TOP_LIMIT) == LOW) 
-      {
-        stopMotor();
-        Serial.println("@top");
-        return true; //already at top
-      }
-        reverseMotor();
-    }
     
+    //check if motor is moving towards the wrong limit switch but give it time to move initially
+    if(millis() - startTime > 300 && digitalRead(BOT_LIMIT) == LOW)
+    {
+       while(digitalRead(BOT_LIMIT) == LOW)
+        {
+          reverseMotor();
+          delay(300);
+        }
+      
+      //restart the clock to give time for the motor to move
+      startTime = millis();
+    }
   }
+    
   stopMotor();
   if(digitalRead(TOP_LIMIT) == HIGH) return false; //motor did not reach proper positioning in time
 }
+
 
 //returns true if motor reaches load position in time
 bool moveToUnload() 
 {
   motorDirectionCW = true;
-  bool attemptOne = false;
-  bool attemptTwo = false;
   if(digitalRead(BOT_LIMIT) == LOW) 
   {
     return true; //already at bottom
   }
   motorCW();
-
+  
+  
   unsigned long startTime = millis();
   while (millis() - startTime < MOTOR_TIMEOUT) 
   {
@@ -138,27 +127,18 @@ bool moveToUnload()
       Serial.println("@bot");
       return true; //already at bottom
     }
-    if(millis() - startTime > 500 && digitalRead(TOP_LIMIT) == LOW && attemptOne == false)
+
+    //check if motor is moving towards the wrong limit switch but give it time to move initially
+    if(millis() - startTime > 300 && digitalRead(TOP_LIMIT) == LOW)
     {
-      attemptOne = true;
-        reverseMotor();
-    }
-      if(digitalRead(BOT_LIMIT) == LOW) 
-      {
-        stopMotor();
-        Serial.println("@bot");
-        return true; //already at bottom
-      }
-     if(millis() - startTime > 1000 && digitalRead(TOP_LIMIT) == LOW && attemptTwo == false)
-    {
-      attemptTwo = true;
-        if(digitalRead(BOT_LIMIT) == LOW) 
-      {
-        stopMotor();
-        Serial.println("@bot");
-        return true; //already at bottom
-      }
-        reverseMotor();
+       while(digitalRead(TOP_LIMIT) == LOW)
+        {
+          reverseMotor();
+          delay(300);
+        }
+      
+      //restart the clock to give time for the motor to move
+      startTime = millis();
     }
   }
   stopMotor();
@@ -257,15 +237,14 @@ bool check_ice_full() {
 }
 
 void state_1() {
-  if (interruptFlag == true) return;
   Serial.println("State 1");
+  if (interruptFlag == true) return;
   unloadTray();
 
   // Wait until ice is NOT full
   if (check_ice_full()) {
     Serial.println("Ice bin full. Retrying in 60 sec...");
     delay(60000);
-    if (interruptFlag == true) return;
     if (check_ice_full()) {
       sleep();
     }
@@ -273,8 +252,8 @@ void state_1() {
 }
 
 void state_2() {
-  if (interruptFlag == true) return;
   Serial.println("State 2");
+  if (interruptFlag == true) return;
   loadTray();
   delay(1000);
   Serial.println("Water is being loaded");
@@ -291,8 +270,8 @@ void state_2() {
 }
 
 void state_3() {
-  if (interruptFlag == true) return;
   Serial.println("State 3");
+  if (interruptFlag == true) return;
   digitalWrite(FAN_PIN, HIGH);
   
   //extra one minute cool down for compressor pressure to stablize
@@ -319,14 +298,13 @@ void state_3() {
 }
 
 void state_4() {
-  if (interruptFlag == true) return;
   Serial.println("State 4");
+  if (interruptFlag == true) return;
   digitalWrite(COMPRESSOR, LOW);
   digitalWrite(FAN_PIN, LOW);
   digitalWrite(SOLENOID, HIGH);
   delay(time_to_release);
   digitalWrite(SOLENOID, LOW);
-
 }
 
 void sleep()
@@ -343,6 +321,7 @@ void sleep()
 }
 
 void loop() {
+  //reset pins
   digitalWrite(FAN_PIN, LOW);
   digitalWrite(WATER_PUMP, LOW);
   digitalWrite(SOLENOID, LOW);
@@ -351,10 +330,9 @@ void loop() {
   digitalWrite(motorPinB, LOW);
     
   unsigned long current_time = millis();
+  //check if button was pushed
  if (interruptFlag) {
     interruptFlag = false; 
-    if(!ICE_FULL && !NO_WATER)
-    {
     system_on = !system_on;
     Serial.print("System: ");
     Serial.println(system_on);
@@ -363,16 +341,15 @@ void loop() {
       sleep();
       return;
     }
-    }
   }
 
   if (system_on) {
     digitalWrite(POWER_LED, HIGH);
     
-    if (system_on) state_1();
-    if (system_on) state_2();
-    if (system_on) state_3();
-    if (system_on) state_4();
+    state_1();
+    state_2();
+    state_3();
+    state_4();
     
   } else {
     if (current_time - last_blink_time >= 1000) {
@@ -380,6 +357,7 @@ void loop() {
       digitalWrite(POWER_LED, led_state ? HIGH : LOW);
       last_blink_time = current_time;
     }
+    
     //resume running after a set period. set to zero to disable
     if(current_time - wentToSleepAt_time > wake_time && wake_time != 0)
     {

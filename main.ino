@@ -17,6 +17,7 @@
 #define time_to_release 12000
 #define time_to_fill_tray 13000 
 const unsigned long MOTOR_TIMEOUT = 5000;
+bool int_enable = false;
 
 // === LOGIC ===
 bool motorDirectionCW = true; //CW dumps ice and CCW loads water
@@ -59,7 +60,7 @@ void toggleSystemState() {
   unsigned long currentTime = millis();
 
   // Check if enough time has passed since the last interrupt
-  if (digitalRead(PUSH_BUTTON) == LOW && ((currentTime - lastInterruptTime) > debounceDelay)) {
+  if (int_enable && digitalRead(PUSH_BUTTON) == LOW && ((currentTime - lastInterruptTime) > debounceDelay)) {
     interruptFlag = true;
     lastInterruptTime = currentTime;
     Serial.println("INTERRUPT TRIGGERED");
@@ -245,9 +246,8 @@ void state_1() {
   if (check_ice_full()) {
     Serial.println("Ice bin full. Retrying in 60 sec...");
     delay(60000);
-    if (check_ice_full()) {
-      sleep();
-    }
+    state_1();
+    
   }
 }
 
@@ -287,7 +287,7 @@ void state_3() {
   digitalWrite(COMPRESSOR, HIGH);
 
   //cooling period is time_to_ice
-  unsigned long startTime = millis();
+  startTime = millis();
   while (millis() - startTime < time_to_ice) {
     if (interruptFlag == true) {
       Serial.println("Button pressed — aborting early");
@@ -331,7 +331,7 @@ void loop() {
     
   unsigned long current_time = millis();
   //check if button was pushed
- if (interruptFlag) {
+ if (interruptFlag && int_enable) {
     interruptFlag = false; 
     system_on = !system_on;
     Serial.print("System: ");

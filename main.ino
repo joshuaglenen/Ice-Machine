@@ -17,7 +17,8 @@
 #define time_to_release 12000
 #define time_to_fill_tray 13000 
 const unsigned long MOTOR_TIMEOUT = 5000;
-bool int_enable = false;
+const bool int_enable = false; // noise mitigation
+const unsigned int run_until = 3600000; // start winding wear relay safety; set zero to disable
 
 // === LOGIC ===
 bool motorDirectionCW = true; //CW dumps ice and CCW loads water
@@ -29,6 +30,7 @@ unsigned long wentToSleepAt_time = 0;
 bool led_state = false;
 volatile bool interruptFlag = false;
 volatile unsigned long lastInterruptTime = 0;
+unsigned long startupTime = 0;
 const unsigned long debounceDelay = 1000; // milliseconds
 
 void setup() {
@@ -53,6 +55,7 @@ void setup() {
   digitalWrite(COMPRESSOR, LOW);
   digitalWrite(motorPinA, LOW); 
   digitalWrite(motorPinB, LOW); 
+  startupTime = millis();
 }
 
 void toggleSystemState() {
@@ -321,6 +324,7 @@ void sleep()
 }
 
 void loop() {
+  
   //reset pins
   digitalWrite(FAN_PIN, LOW);
   digitalWrite(WATER_PUMP, LOW);
@@ -330,6 +334,8 @@ void loop() {
   digitalWrite(motorPinB, LOW);
     
   unsigned long current_time = millis();
+
+ if(current_time - startupTime > run_until && run_until != 0) {sleep(); return;}
   //check if button was pushed
  if (interruptFlag && int_enable) {
     interruptFlag = false; 

@@ -47,6 +47,7 @@ const unsigned long debounceDelay = 1000;
 
 void setup() {
   Serial.begin(9600);
+
   attachInterrupt(digitalPinToInterrupt(PUSH_BUTTON), toggleSystemState, FALLING);
   pinMode(FAN_PIN, OUTPUT);
   pinMode(WATER_PUMP, OUTPUT);
@@ -71,13 +72,24 @@ void setup() {
 
   //init eeprom for compressor manditory cooldown
   if (EEPROM.read(EE_MAGIC_ADDR) != EE_MAGIC) {
-  EEPROM.update(EE_MAGIC_ADDR, EE_MAGIC);
-}
-  cooldownRequired = (EEPROM.read(EE_COOLDOWN_FLAG_ADDR) != 0);
+      EEPROM.update(EE_MAGIC_ADDR, EE_MAGIC);
+      EEPROM.update(EE_COOLDOWN_FLAG_ADDR, 0);  // assume cold
+    }
+
+    uint8_t flag = EEPROM.read(EE_COOLDOWN_FLAG_ADDR);
+
+  // EEPROM healthy?
+  if (flag != 0 && flag != 1) {
+    flag = 0; // assume cold 
+    EEPROM.update(EE_COOLDOWN_FLAG_ADDR, flag);
+  }
+
+  cooldownRequired = (flag == 1);
   if (cooldownRequired) {
-  compressorOffAt = millis(); 
-}
-}
+    compressorOffAt = millis();
+  }
+
+  }
 
 void toggleSystemState() {
   unsigned long currentTime = millis();
@@ -254,38 +266,40 @@ bool check_ice_full() {
 }
 
 void compressorOn() {
-  // enforce cooldown after any stop
   if (cooldownRequired && (millis() - compressorOffAt < COOLDOWN_MS)) return;
+
+  EEPROM.update(EE_COOLDOWN_FLAG_ADDR, 1);
+
   cooldownRequired = false;
-  EEPROM.update(EE_COOLDOWN_FLAG_ADDR, 0);
-  
-  detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON)); 
+
+  detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON));
   delay(100);
   digitalWrite(FAN_PIN, HIGH);
   digitalWrite(COMPRESSOR, HIGH);
   delay(100);
   attachInterrupt(digitalPinToInterrupt(PUSH_BUTTON), toggleSystemState, FALLING);
-  
+
   if (!compressorRunning) {
     compressorRunning = true;
     compressorOnAt = millis();
   }
 }
 
+
 void compressorOff() {
-  detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON)); 
+  detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON));
   delay(10);
   digitalWrite(COMPRESSOR, LOW);
   digitalWrite(FAN_PIN, LOW);
   delay(100);
   attachInterrupt(digitalPinToInterrupt(PUSH_BUTTON), toggleSystemState, FALLING);
-  
+
   compressorRunning = false;
   compressorOffAt = millis();
   cooldownRequired = true;
-  EEPROM.update(EE_COOLDOWN_FLAG_ADDR, 1);
-  
+
 }
+
 
 
 void state_1() {
@@ -340,7 +354,9 @@ void state_3() {
 }
 
 void state_4() {
-  Serial.println("State 4");  
+  if (interruptFlag == true || cooldownRequired != 0) return;
+  Serial.println("State 4");
+  
   digitalWrite(WATER_PUMP, LOW);
   detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON)); 
   delay(10);
@@ -389,6 +405,15 @@ void loop() {
     }
   }
 
+  if (cooldownRequired && (millis() - compressorOffAt >= COOLDOWN_MS)) {
+  cooldownRequired = false;
+  EEPROM.update(EE_COOLDOWN_FLAG_ADDR, 0);  
+}
+
+  if(cooldownRequired) {
+    delay(10);
+    return;
+  }
   if (system_on) {
     digitalWrite(POWER_LED, HIGH);
     state_1();
@@ -397,6 +422,7 @@ void loop() {
     state_4();
     
   } else {
+    delay(10);
     if (current_time - last_blink_time >= 1000) {
       led_state = !led_state;
       digitalWrite(POWER_LED, led_state ? HIGH : LOW);

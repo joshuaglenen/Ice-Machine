@@ -1,3 +1,4 @@
+#include <EEPROM.h>
 #define FAN_PIN 11
 #define WATER_PUMP 3
 #define SOLENOID 4
@@ -12,26 +13,37 @@
 #define WATER_FLOW_SENSOR A0
 
 // === Adjustables ===
-#define wake_time 21600000 // wakes back up in 6 hour. set to zero to disable
-#define time_to_ice 660000    
-#define time_to_release 12000
-#define time_to_fill_tray 13000 
-const unsigned long MOTOR_TIMEOUT = 5000;
-const bool int_enable = false; // noise mitigation
-const unsigned int run_until = 3600000; // start winding wear relay safety; set zero to disable
+#define time_to_ice 600000    
+#define time_to_release 6000
+#define time_to_fill_tray 10000 
+const unsigned long MOTOR_TIMEOUT = 10000;
+const bool int_enable = true; 
+const unsigned long SESSION_MS = 3600000UL;
 
 // === LOGIC ===
 bool motorDirectionCW = true; //CW dumps ice and CCW loads water
 bool ICE_FULL = false;
 bool NO_WATER = false;
-bool system_on = true;\
+bool system_on = true;
+bool led_state = false;
+bool cooldownRequired = false;
+bool compressorRunning = false;
+
+const int EE_COOLDOWN_FLAG_ADDR = 0;  
+const uint8_t EE_MAGIC = 0xA5;
+const int EE_MAGIC_ADDR = 1;          
+
+unsigned long compressorOnAt = 0;
+unsigned long compressorOffAt = 0;
+const unsigned long COOLDOWN_MS = 10UL * 60UL * 1000UL;
+
 unsigned long last_blink_time = 0;
 unsigned long wentToSleepAt_time = 0;
-bool led_state = false;
+unsigned long startupTime = 0;
+
 volatile bool interruptFlag = false;
 volatile unsigned long lastInterruptTime = 0;
-unsigned long startupTime = 0;
-const unsigned long debounceDelay = 1000; // milliseconds
+const unsigned long debounceDelay = 1000;
 
 void setup() {
   Serial.begin(9600);
@@ -56,17 +68,22 @@ void setup() {
   digitalWrite(motorPinA, LOW); 
   digitalWrite(motorPinB, LOW); 
   startupTime = millis();
+
+  //init eeprom for compressor manditory cooldown
+  if (EEPROM.read(EE_MAGIC_ADDR) != EE_MAGIC) {
+  EEPROM.update(EE_MAGIC_ADDR, EE_MAGIC);
+}
+  cooldownRequired = (EEPROM.read(EE_COOLDOWN_FLAG_ADDR) != 0);
+  if (cooldownRequired) {
+  compressorOffAt = millis(); 
+}
 }
 
 void toggleSystemState() {
-  delayMicroseconds(10);
   unsigned long currentTime = millis();
-
-  // Check if enough time has passed since the last interrupt
   if (int_enable && digitalRead(PUSH_BUTTON) == LOW && ((currentTime - lastInterruptTime) > debounceDelay)) {
     interruptFlag = true;
     lastInterruptTime = currentTime;
-    Serial.println("INTERRUPT TRIGGERED");
 
   }
 }
@@ -152,7 +169,7 @@ bool moveToUnload()
 void stopMotor() {
   digitalWrite(motorPinA, LOW);
   digitalWrite(motorPinB, LOW);
-  delay(250);
+  delay(50);
 }
 
 void motorCW()
@@ -195,25 +212,21 @@ void reverseMotor()
 
 void unloadTray()
 {
-  while(!moveToUnload()) 
-  { if (interruptFlag == true) {
-      Serial.println("Button pressed — aborting early");
-      break;
-      }
-      }
-  Serial.println("NOW UNLOADED");
+  detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON));
+  while(!moveToUnload()) {delay(10);}
+   Serial.println("NOW UNLOADED");
+  attachInterrupt(digitalPinToInterrupt(PUSH_BUTTON), toggleSystemState, FALLING);
 }
 
 void loadTray()
 {
+  detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON));
   while(!moveToload()) 
   {
-     if (interruptFlag == true) {
-      Serial.println("Button pressed — aborting early");
-      break;
-      }
+     delay(10);
     }
   Serial.println("NOW LOADED");
+  attachInterrupt(digitalPinToInterrupt(PUSH_BUTTON), toggleSystemState, FALLING);
 }
 
 // === System Controls ===
@@ -240,74 +253,103 @@ bool check_ice_full() {
   return ICE_FULL;
 }
 
+void compressorOn() {
+  // enforce cooldown after any stop
+  if (cooldownRequired && (millis() - compressorOffAt < COOLDOWN_MS)) return;
+  cooldownRequired = false;
+  EEPROM.update(EE_COOLDOWN_FLAG_ADDR, 0);
+  
+  detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON)); 
+  delay(100);
+  digitalWrite(FAN_PIN, HIGH);
+  digitalWrite(COMPRESSOR, HIGH);
+  delay(100);
+  attachInterrupt(digitalPinToInterrupt(PUSH_BUTTON), toggleSystemState, FALLING);
+  
+  if (!compressorRunning) {
+    compressorRunning = true;
+    compressorOnAt = millis();
+  }
+}
+
+void compressorOff() {
+  detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON)); 
+  delay(10);
+  digitalWrite(COMPRESSOR, LOW);
+  digitalWrite(FAN_PIN, LOW);
+  delay(100);
+  attachInterrupt(digitalPinToInterrupt(PUSH_BUTTON), toggleSystemState, FALLING);
+  
+  compressorRunning = false;
+  compressorOffAt = millis();
+  cooldownRequired = true;
+  EEPROM.update(EE_COOLDOWN_FLAG_ADDR, 1);
+  
+}
+
+
 void state_1() {
   Serial.println("State 1");
-  if (interruptFlag == true) return;
   unloadTray();
 
   // Wait until ice is NOT full
   if (check_ice_full()) {
-    Serial.println("Ice bin full. Retrying in 60 sec...");
-    delay(60000);
-    state_1();
-    
+    Serial.println("Ice bin full.");
+    sleep();
   }
 }
 
 void state_2() {
   Serial.println("State 2");
-  if (interruptFlag == true) return;
   loadTray();
   delay(1000);
   Serial.println("Water is being loaded");
   pump_water();
   if (NO_WATER) {
-    Serial.println("No water detected. Retrying in 60 sec...");
-    delay(60000);
-    if (interruptFlag == true) return;
-    pump_water();
-    if (NO_WATER){
-      sleep();
+    Serial.println("No water detected.");
+    sleep();
     }
   }
-}
+
 
 void state_3() {
   Serial.println("State 3");
-  if (interruptFlag == true) return;
-  digitalWrite(FAN_PIN, HIGH);
   
-  //extra one minute cool down for compressor pressure to stablize
-  unsigned long startTime = millis();
-  while (millis() - startTime < 60000) {
-    if (interruptFlag == true) {
-      Serial.println("Button pressed — aborting early");
-      break;
-      }
-    delay(10);
+  compressorOn();
+  if (!compressorRunning) {
+    Serial.println("Cooldown active, waiting...");
+    delay(1000);
+    return;
   }
   
-  digitalWrite(COMPRESSOR, HIGH);
-
   //cooling period is time_to_ice
-  startTime = millis();
+  unsigned long startTime = millis();
   while (millis() - startTime < time_to_ice) {
     if (interruptFlag == true) {
       Serial.println("Button pressed — aborting early");
       break;
       }
+     // End session after 1 hour adjustable
+    if (SESSION_MS != 0 && (millis() - compressorOnAt >= SESSION_MS)) {
+      Serial.println("Session limit reached.");
+      compressorOff();
+      return;
+    }
     delay(10);
   }
 }
 
 void state_4() {
-  Serial.println("State 4");
-  if (interruptFlag == true) return;
-  digitalWrite(COMPRESSOR, LOW);
-  digitalWrite(FAN_PIN, LOW);
+  Serial.println("State 4");  
+  digitalWrite(WATER_PUMP, LOW);
+  detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON)); 
+  delay(10);
   digitalWrite(SOLENOID, HIGH);
   delay(time_to_release);
   digitalWrite(SOLENOID, LOW);
+  delay(100);
+  attachInterrupt(digitalPinToInterrupt(PUSH_BUTTON), toggleSystemState, FALLING);
+  delay(1000);
 }
 
 void sleep()
@@ -315,30 +357,28 @@ void sleep()
     wentToSleepAt_time = millis();
     Serial.println("Sleeping");
     system_on = false;
+    compressorOff();
     digitalWrite(FAN_PIN, LOW);
     digitalWrite(WATER_PUMP, LOW);
+    
+    detachInterrupt(digitalPinToInterrupt(PUSH_BUTTON)); 
+    delay(10);
     digitalWrite(SOLENOID, LOW);
-    digitalWrite(COMPRESSOR, LOW);
     digitalWrite(motorPinA, LOW);
     digitalWrite(motorPinB, LOW);
+    delay(100);
+    attachInterrupt(digitalPinToInterrupt(PUSH_BUTTON), toggleSystemState, FALLING);
 }
 
 void loop() {
-  
-  //reset pins
-  digitalWrite(FAN_PIN, LOW);
-  digitalWrite(WATER_PUMP, LOW);
-  digitalWrite(SOLENOID, LOW);
-  digitalWrite(COMPRESSOR, LOW);
-  digitalWrite(motorPinA, LOW);
-  digitalWrite(motorPinB, LOW);
     
   unsigned long current_time = millis();
-
- if(current_time - startupTime > run_until && run_until != 0) {sleep(); return;}
-  //check if button was pushed
+  
+  //check if power button was pushed
  if (interruptFlag && int_enable) {
     interruptFlag = false; 
+    delay(300);
+    if(digitalRead(PUSH_BUTTON) != LOW) return;
     system_on = !system_on;
     Serial.print("System: ");
     Serial.println(system_on);
@@ -351,7 +391,6 @@ void loop() {
 
   if (system_on) {
     digitalWrite(POWER_LED, HIGH);
-    
     state_1();
     state_2();
     state_3();
@@ -363,16 +402,5 @@ void loop() {
       digitalWrite(POWER_LED, led_state ? HIGH : LOW);
       last_blink_time = current_time;
     }
-    
-    //resume running after a set period. set to zero to disable
-    if(current_time - wentToSleepAt_time > wake_time && wake_time != 0)
-    {
-      system_on = !system_on;
-      Serial.print("System: ");
-      Serial.println(system_on);
-    }
-    
   }
-
-  
 }
